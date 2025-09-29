@@ -21,7 +21,7 @@ from torch import nn
 from x_transformers.x_transformers import apply_rotary_pos_emb
 
 from f5_tts.model.utils import is_package_available
-
+from f5_tts.model.spectrogram import StreamingLogMelSpectrogram
 
 # raw wav to mel spec
 
@@ -122,11 +122,22 @@ class MelSpec(nn.Module):
         self.win_length = win_length
         self.n_mel_channels = n_mel_channels
         self.target_sample_rate = target_sample_rate
+        self.mel_spec_type = mel_spec_type
 
         if mel_spec_type == "vocos":
             self.extractor = get_vocos_mel_spectrogram
         elif mel_spec_type == "bigvgan":
             self.extractor = get_bigvgan_mel_spectrogram
+        elif mel_spec_type == "stream_stft":
+            self.extractor = StreamingLogMelSpectrogram(
+                sample_rate=target_sample_rate,
+                n_fft=n_fft,
+                win_length=win_length,
+                hop_length=hop_length,
+                n_mels=n_mel_channels,
+                causal=True,
+                pad_mode="constant",
+            )
 
         self.register_buffer("dummy", torch.tensor(0), persistent=False)
 
@@ -134,14 +145,19 @@ class MelSpec(nn.Module):
         if self.dummy.device != wav.device:
             self.to(wav.device)
 
-        mel = self.extractor(
-            waveform=wav,
-            n_fft=self.n_fft,
-            n_mel_channels=self.n_mel_channels,
-            target_sample_rate=self.target_sample_rate,
-            hop_length=self.hop_length,
-            win_length=self.win_length,
-        )
+        if self.mel_spec_type in ["vocos", "bigvgan"]:
+            mel = self.extractor(
+                waveform=wav,
+                n_fft=self.n_fft,
+                n_mel_channels=self.n_mel_channels,
+                target_sample_rate=self.target_sample_rate,
+                hop_length=self.hop_length,
+                win_length=self.win_length,
+            )
+        elif self.mel_spec_type == "stream_stft":
+            mel = self.extractor(wav)
+        else:
+            raise ValueError(f"Unrecognized mel_spec_type: {self.mel_spec_type}")
 
         return mel
 

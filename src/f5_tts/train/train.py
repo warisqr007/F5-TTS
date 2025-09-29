@@ -29,7 +29,11 @@ def main(model_cfg):
         tokenizer_path = model_cfg.datasets.name
     else:
         tokenizer_path = model_cfg.model.tokenizer_path
-    vocab_char_map, vocab_size = get_tokenizer(tokenizer_path, tokenizer)
+    if tokenizer == "tokenid":
+        num_tokens = model_cfg.model.num_tokens
+        vocab_char_map, vocab_size = get_tokenizer("", tokenizer, num_tokens)
+    else:
+        vocab_char_map, vocab_size = get_tokenizer(tokenizer_path, tokenizer)
 
     # set model
     model = CFM(

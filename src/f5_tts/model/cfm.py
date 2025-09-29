@@ -18,13 +18,14 @@ from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from torchdiffeq import odeint
 
-from f5_tts.model.modules import MelSpec
+from f5_tts.model.streaming_modules import MelSpec
 from f5_tts.model.utils import (
     default,
     exists,
     get_epss_timesteps,
     lens_to_mask,
     list_str_to_idx,
+    list_str_tokenid_to_idx,
     list_str_to_tensor,
     mask_from_frac_lengths,
 )
@@ -45,7 +46,7 @@ class CFM(nn.Module):
         num_channels=None,
         mel_spec_module: nn.Module | None = None,
         mel_spec_kwargs: dict = dict(),
-        frac_lengths_mask: tuple[float, float] = (0.7, 1.0),
+        frac_lengths_mask: tuple[float, float] = (0.6, 1.0),
         vocab_char_map: dict[str:int] | None = None,
     ):
         super().__init__()
@@ -116,10 +117,11 @@ class CFM(nn.Module):
         # text
 
         if isinstance(text, list):
-            if exists(self.vocab_char_map):
-                text = list_str_to_idx(text, self.vocab_char_map).to(device)
-            else:
-                text = list_str_to_tensor(text).to(device)
+            # if exists(self.vocab_char_map):
+            #     text = list_str_to_idx(text, self.vocab_char_map).to(device)
+            # else:
+            #     text = list_str_to_tensor(text).to(device)
+            text = list_str_tokenid_to_idx(text, self.vocab_char_map).to(device)
             assert text.shape[0] == batch
 
         # duration
@@ -245,10 +247,11 @@ class CFM(nn.Module):
 
         # handle text as string
         if isinstance(text, list):
-            if exists(self.vocab_char_map):
-                text = list_str_to_idx(text, self.vocab_char_map).to(device)
-            else:
-                text = list_str_to_tensor(text).to(device)
+            # if exists(self.vocab_char_map):
+            #     text = list_str_to_idx(text, self.vocab_char_map).to(device)
+            # else:
+            #     text = list_str_to_tensor(text).to(device)
+            text = list_str_tokenid_to_idx(text, self.vocab_char_map).to(device)
             assert text.shape[0] == batch
 
         # lens and mask
@@ -259,7 +262,7 @@ class CFM(nn.Module):
 
         # get a random span to mask out for training conditionally
         frac_lengths = torch.zeros((batch,), device=self.device).float().uniform_(*self.frac_lengths_mask)
-        rand_span_mask = mask_from_frac_lengths(lens, frac_lengths)
+        rand_span_mask = mask_from_frac_lengths(lens, frac_lengths, mask_always_max_start=True)
 
         if exists(mask):
             rand_span_mask &= mask

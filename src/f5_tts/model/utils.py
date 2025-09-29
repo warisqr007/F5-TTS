@@ -64,12 +64,15 @@ def mask_from_start_end_indices(seq_len: int["b"], start: int["b"], end: int["b"
     return start_mask & end_mask
 
 
-def mask_from_frac_lengths(seq_len: int["b"], frac_lengths: float["b"]):  # noqa: F722 F821
+def mask_from_frac_lengths(seq_len: int["b"], frac_lengths: float["b"], mask_always_max_start: bool = False):  # noqa: F722 F821
     lengths = (frac_lengths * seq_len).long()
     max_start = seq_len - lengths
 
     rand = torch.rand_like(frac_lengths)
-    start = (max_start * rand).long().clamp(min=0)
+    if mask_always_max_start:
+        start = max_start
+    else:
+        start = (max_start * rand).long().clamp(min=0)
     end = start + lengths
 
     return mask_from_start_end_indices(seq_len, start, end)
@@ -103,11 +106,20 @@ def list_str_to_idx(
     text = pad_sequence(list_idx_tensors, padding_value=padding_value, batch_first=True)
     return text
 
+def list_str_tokenid_to_idx(
+    text: list[str] | list[list[str]],
+    vocab_char_map: dict[str, int],  # {char: idx}
+    padding_value=-1,
+) -> int["b nt"]:  # noqa: F722
+    list_idx_tensors = [torch.tensor([vocab_char_map.get(c, 0) for c in t.split(" ")]) for t in text]  # pinyin or char style
+    text = pad_sequence(list_idx_tensors, padding_value=padding_value, batch_first=True)
+    return text
+
 
 # Get tokenizer
 
 
-def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
+def get_tokenizer(dataset_name, tokenizer: str = "pinyin", num_tokens: int = None):
     """
     tokenizer   - "pinyin" do g2p for only chinese characters, need .txt vocab_file
                 - "char" for char-wise tokenizer, need .txt vocab_file
@@ -136,6 +148,11 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
             for i, char in enumerate(f):
                 vocab_char_map[char[:-1]] = i
         vocab_size = len(vocab_char_map)
+
+    elif tokenizer == "tokenid":
+        assert num_tokens is not None, "num_tokens must be specified for tokenid tokenizer"
+        vocab_size = num_tokens
+        vocab_char_map = {str(i): i+1 for i in range(num_tokens)}
 
     return vocab_char_map, vocab_size
 
