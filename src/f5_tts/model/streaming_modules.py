@@ -121,7 +121,7 @@ class MelSpec(nn.Module):
         mel_spec_type="vocos",
     ):
         super().__init__()
-        assert mel_spec_type in ["vocos", "bigvgan"], print("We only support two extract mel backend: vocos or bigvgan")
+        assert mel_spec_type in ["vocos", "bigvgan", "stream_stft"], print("We only support two extract mel backend: vocos or bigvgan")
 
         self.n_fft = n_fft
         self.hop_length = hop_length

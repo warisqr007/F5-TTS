@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"  # for MPS device compatibility
 sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}/../../third_party/BigVGAN/")
+sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}/../../third_party/vocos/")
 
 import hashlib
 import re
@@ -102,6 +103,7 @@ def chunk_text(text, max_chars=135):
 
 # load vocoder
 def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=device, hf_cache_dir=None):
+    VocoderCls = None
     if vocoder_name == "vocos":
         # vocoder = Vocos.from_pretrained("charactr/vocos-mel-24khz").to(device)
         if is_local:
@@ -139,6 +141,17 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
             )
 
         vocoder.remove_weight_norm()
+        vocoder = vocoder.eval().to(device)
+    elif vocoder_name == "stream_stft":
+        # try:
+        from third_party.vocos import VocosVocoderModule
+        VocoderCls = VocosVocoderModule
+        # except ImportError:
+        #     print("You need to follow the README to init submodule and change the Vocos source code.")
+        vocoder = VocoderCls.load_from_checkpoint(
+            '/mnt/data1/waris/PSI-TAMU/F5-TTS/src/third_party/vocos/ckpts/epoch=3.ckpt',
+            map_location="cpu",
+        )
         vocoder = vocoder.eval().to(device)
     return vocoder
 

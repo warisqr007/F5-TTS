@@ -1,4 +1,6 @@
 import json
+import glob
+from pathlib import Path
 from importlib.resources import files
 
 import torch
@@ -9,6 +11,8 @@ from datasets import load_from_disk
 from torch import nn
 from torch.utils.data import Dataset, Sampler
 from tqdm import tqdm
+import random
+import numpy as np
 
 # from f5_tts.model.modules import MelSpec
 from f5_tts.model.streaming_modules import MelSpec
@@ -166,19 +170,19 @@ class CustomDataset(Dataset):
 class CustomStreamingDataset(Dataset):
     def __init__(
         self,
-        custom_dataset: Dataset,
-        durations=None,
-        target_sample_rate=24_000,
-        hop_length=256,
-        n_mel_channels=100,
+        files_path,
+        target_sample_rate=16_000,
+        hop_length=320,
+        n_mel_channels=80,
         n_fft=1024,
         win_length=1024,
-        mel_spec_type="vocos",
+        mel_spec_type="stream_stft",
         preprocessed_mel=False,
         mel_spec_module: nn.Module | None = None,
     ):
-        self.data = custom_dataset
-        self.durations = durations
+        self.files_path = files_path
+        self.audio_files = glob.glob(f"{files_path}/**/wav/*.wav")
+
         self.target_sample_rate = target_sample_rate
         self.hop_length = hop_length
         self.n_fft = n_fft
@@ -200,45 +204,75 @@ class CustomStreamingDataset(Dataset):
             )
 
     def get_frame_len(self, index):
-        if (
-            self.durations is not None
-        ):  # Please make sure the separately provided durations are correct, otherwise 99.99% OOM
-            return self.durations[index] * self.target_sample_rate / self.hop_length
-        return self.data[index]["duration"] * self.target_sample_rate / self.hop_length
+        token_fpath = Path(self.audio_files[index]).parent.parent / "tokens_q256" / (Path(self.audio_files[index]).stem + ".tokens.txt")
+        with open(token_fpath, "r") as f:
+            token_str = f.read().strip()
+        duration = len(token_str.split())
+        return duration
+
+    def _sample_interval(self, seqs, seq_len=None):
+        N = max([v.shape[-1] for v in seqs])
+        if seq_len is None:
+            seq_len = self.segment_size if self.segment_size > 0 else N
+
+        hops = [N // v.shape[-1] for v in seqs]
+        lcm = np.lcm.reduce(hops)
+
+        # Randomly pickup with the batch_max_steps length of the part
+        interval_start = 0
+        interval_end = N // lcm - seq_len // lcm
+
+        start_step = random.randint(interval_start, interval_end)
+
+        new_seqs = []
+        for i, v in enumerate(seqs):
+            start = start_step * (lcm // hops[i])
+            end = (start_step + seq_len // lcm) * (lcm // hops[i])
+            new_seqs += [v[..., start:end]]
+
+        return new_seqs
 
     def __len__(self):
-        return len(self.data)
+        return len(self.audio_files)
 
     def __getitem__(self, index):
         while True:
-            row = self.data[index]
-            audio_path = row["audio_path"]
-            text = row["text"]
-            duration = row["duration"]
+            audio_path = self.audio_files[index]
+            token_fpath = Path(audio_path).parent.parent / "tokens_q256" / (Path(audio_path).stem + ".tokens.txt")
+            with open(token_fpath, "r") as f:
+                text = f.read().strip()
+            duration = len(text.split())
 
             # filter by given length
-            if 0.3 <= duration <= 30:
+            if 0.3 <= (duration * self.hop_length) / self.target_sample_rate:
                 break  # valid
 
-            index = (index + 1) % len(self.data)
+            index = (index + 1) % len(self.audio_files)
 
-        if self.preprocessed_mel:
-            mel_spec = torch.tensor(row["mel_spec"])
-        else:
-            audio, source_sample_rate = torchaudio.load(audio_path)
+        audio, source_sample_rate = torchaudio.load(audio_path)
+        # make sure mono input
+        if audio.shape[0] > 1:
+            audio = torch.mean(audio, dim=0, keepdim=True)
 
-            # make sure mono input
-            if audio.shape[0] > 1:
-                audio = torch.mean(audio, dim=0, keepdim=True)
+        # resample if necessary
+        if source_sample_rate != self.target_sample_rate:
+            resampler = torchaudio.transforms.Resample(source_sample_rate, self.target_sample_rate)
+            audio = resampler(audio)
 
-            # resample if necessary
-            if source_sample_rate != self.target_sample_rate:
-                resampler = torchaudio.transforms.Resample(source_sample_rate, self.target_sample_rate)
-                audio = resampler(audio)
+        # random crop for long audio
+        code_length = min(audio.shape[-1] // self.hop_length, duration)
+        audio = audio[:, : code_length * self.hop_length]
+        tokens = torch.tensor([int(i) for i in text.split(" ")])
+        tokens = tokens[:code_length]
 
-            # to mel spectrogram
-            mel_spec = self.mel_spectrogram(audio)
-            mel_spec = mel_spec.squeeze(0)  # '1 d t -> d t'
+        if (code_length * self.hop_length) / self.target_sample_rate >= 6:
+            audio, tokens = self._sample_interval([audio, tokens], seq_len=6 * self.target_sample_rate)
+
+        text = " ".join([str(i.item()) for i in tokens])
+
+        # to mel spectrogram
+        mel_spec = self.mel_spectrogram(audio)
+        mel_spec = mel_spec.squeeze(0)  # '1 d t -> d t'
 
         return {
             "mel_spec": mel_spec,
@@ -383,6 +417,10 @@ def load_dataset(
         train_dataset = HFDataset(
             load_dataset(f"{pre}/{pre}", split=f"train.{post}", cache_dir=str(files("f5_tts").joinpath("../../data"))),
         )
+
+    elif dataset_type == "CustomStreamingDataset":
+        files_path = "/mnt/nvme-data1/waris/streamVC_data/data"
+        train_dataset = CustomStreamingDataset(files_path, **mel_spec_kwargs)
 
     return train_dataset
 

@@ -111,7 +111,7 @@ def list_str_tokenid_to_idx(
     vocab_char_map: dict[str, int],  # {char: idx}
     padding_value=-1,
 ) -> int["b nt"]:  # noqa: F722
-    list_idx_tensors = [torch.tensor([vocab_char_map.get(c, 0) for c in t.split(" ")]) for t in text]  # pinyin or char style
+    list_idx_tensors = [torch.tensor([vocab_char_map.get(c, 0) for c in t.split()]) for t in text]  # pinyin or char style
     text = pad_sequence(list_idx_tensors, padding_value=padding_value, batch_first=True)
     return text
 
@@ -151,7 +151,7 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin", num_tokens: int = Non
 
     elif tokenizer == "tokenid":
         assert num_tokens is not None, "num_tokens must be specified for tokenid tokenizer"
-        vocab_size = num_tokens
+        vocab_size = num_tokens + 1  # +1 for 0 padding
         vocab_char_map = {str(i): i+1 for i in range(num_tokens)}
 
     return vocab_char_map, vocab_size

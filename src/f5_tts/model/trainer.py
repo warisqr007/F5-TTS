@@ -425,6 +425,9 @@ class Trainer:
                             elif self.vocoder_name == "bigvgan":
                                 gen_audio = vocoder(gen_mel_spec).squeeze(0).cpu()
                                 ref_audio = vocoder(ref_mel_spec).squeeze(0).cpu()
+                            elif self.vocoder_name == "stream_stft":
+                                gen_audio = vocoder(gen_mel_spec).squeeze(0).cpu()
+                                ref_audio = vocoder(ref_mel_spec).squeeze(0).cpu()
 
                         torchaudio.save(
                             f"{log_samples_path}/update_{global_update}_gen.wav", gen_audio, target_sample_rate

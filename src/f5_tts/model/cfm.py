@@ -46,7 +46,7 @@ class CFM(nn.Module):
         num_channels=None,
         mel_spec_module: nn.Module | None = None,
         mel_spec_kwargs: dict = dict(),
-        frac_lengths_mask: tuple[float, float] = (0.6, 1.0),
+        frac_lengths_mask: tuple[float, float] = (0.5, 0.8),
         vocab_char_map: dict[str:int] | None = None,
     ):
         super().__init__()
